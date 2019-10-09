@@ -6,13 +6,15 @@ module Grape
     class Error < Base
       include Formats
 
+      TEXT_HTML = 'text/html'.freeze
+
       def default_options
-      { 
+      {
         :default_status => 403, # default status returned on error
         :default_message => "",
         :format => :txt,
         :formatters => {},
-        :rescue_all => false, # true to rescue all exceptions        
+        :rescue_all => false, # true to rescue all exceptions
         :rescue_options => { :backtrace => false }, # true to display backtrace
         :rescue_handlers => {}, # rescue handler blocks
         :rescued_errors => []
@@ -26,7 +28,7 @@ module Grape
         end
         MultiJson.dump(result)
       end
-      
+
       def encode_txt(message, backtrace)
         result = message.is_a?(Hash) ? MultiJson.dump(message) : message
         if (options[:rescue_options] || {})[:backtrace] && backtrace && ! backtrace.empty?
@@ -38,23 +40,23 @@ module Grape
 
       def call!(env)
         @env = env
-        
+
         begin
-          error_response(catch(:error){ 
-            return @app.call(@env) 
+          error_response(catch(:error){
+            return @app.call(@env)
           })
         rescue Exception => e
           raise unless options[:rescue_all] || (options[:rescued_errors] || []).include?(e.class)
           handler = options[:rescue_handlers][e.class] || options[:rescue_handlers][:all]
           handler.nil? ? handle_error(e) : self.instance_exec(e, &handler)
         end
-        
+
       end
-      
+
       def handle_error(e)
         error_response({ :message => e.message, :backtrace => e.backtrace })
       end
-      
+
       def error_response(error = {})
         status = error[:status] || options[:default_status]
         message = error[:message] || options[:default_message]
@@ -65,15 +67,21 @@ module Grape
       end
 
       def rack_response(message, status = options[:default_status], headers = { 'Content-Type' => content_type })
+        # fix CVE-2018-3769
+        if headers['Content-Type'] == TEXT_HTML
+          message = Rack::Utils.escape_html(message)
+        end
+        # end fix
+
         Rack::Response.new([ message ], status, headers).finish
       end
-            
+
       def format_message(message, backtrace, status)
         formatter = formatter_for(options[:format])
         throw :error, :status => 406, :message => "The requested format #{options[:format]} is not supported." unless formatter
         formatter.call(message, backtrace)
       end
-      
+
     end
   end
 end
